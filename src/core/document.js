@@ -11,6 +11,11 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Modifications by IMG.LY GmbH (https://github.com/imgly/pdf.js):
+ * Page exposes trimBox, bleedBox, and colorSpaceResources getters
+ * (Separation/DeviceN tint resolution via PDFFunctionFactory).
+ * See README of imgly/pdf.js for details.
  */
 
 import {
@@ -68,6 +73,7 @@ import { NullStream } from "./stream.js";
 import { ObjectLoader } from "./object_loader.js";
 import { OperatorList } from "./operator_list.js";
 import { PartialEvaluator } from "./evaluator.js";
+import { PDFFunctionFactory } from "./function.js";
 import { StreamsSequenceStream } from "./decode_stream.js";
 import { StructTreePage } from "./struct_tree.js";
 import { XFAFactory } from "./xfa/factory.js";
@@ -190,6 +196,110 @@ class Page {
       "cropBox",
       this._getBoundingBox("CropBox") || this.mediaBox
     );
+  }
+
+  // imgly: TrimBox / BleedBox / colorSpaceResources are surfaced by the
+  // @imgly fork of pdfjs-dist; see scripts/check-patches.sh.
+  get trimBox() {
+    return shadow(this, "trimBox", this._getBoundingBox("TrimBox"));
+  }
+
+  get bleedBox() {
+    return shadow(this, "bleedBox", this._getBoundingBox("BleedBox"));
+  }
+
+  get colorSpaceResources() {
+    // imgly: Resolve Separation / DeviceN color space entries from the
+    // page's /ColorSpace resource dictionary to a flat,
+    // worker-boundary-safe descriptor:
+    //   { kind, name | names[], alternateSpace, solid }
+    //
+    // Collapsing here (instead of re-deriving on the main thread) is
+    // necessary because pdf.js does not expose /ColorSpace dicts, tint
+    // functions, or xref fetches to the display API. The output is
+    // plain JSON so PDFPageProxy can forward it unchanged.
+    const out = {};
+    const csDict = this.resources.get("ColorSpace");
+    if (!(csDict instanceof Dict)) {
+      return shadow(this, "colorSpaceResources", out);
+    }
+    let factory;
+    const getFactory = () => {
+      if (!factory) {
+        factory = new PDFFunctionFactory({
+          xref: this.xref,
+          isEvalSupported: this.evaluatorOptions?.isEvalSupported !== false,
+        });
+      }
+      return factory;
+    };
+    for (const key of csDict.getKeys()) {
+      try {
+        const cs = csDict.getRaw(key);
+        const arr = this.xref.fetchIfRef(cs);
+        if (!Array.isArray(arr) || arr.length < 4) {
+          continue;
+        }
+        const kind = arr[0]?.name ? arr[0].name : String(arr[0] ?? "");
+        if (kind !== "Separation" && kind !== "DeviceN") {
+          continue;
+        }
+        const nameObj = this.xref.fetchIfRef(arr[1]);
+        const altCSRaw = this.xref.fetchIfRef(arr[2]);
+        const altKind = Array.isArray(altCSRaw)
+          ? (altCSRaw[0]?.name ?? String(altCSRaw[0] ?? ""))
+          : (altCSRaw?.name ?? String(altCSRaw ?? ""));
+        let alternateSpace = "DeviceRGB";
+        if (altKind === "DeviceCMYK") {
+          alternateSpace = "DeviceCMYK";
+        } else if (altKind === "DeviceGray") {
+          alternateSpace = "DeviceGray";
+        } else if (altKind === "DeviceRGB") {
+          alternateSpace = "DeviceRGB";
+        }
+        let solid = [];
+        try {
+          const tintFn = getFactory().create(arr[3]);
+          const inputs =
+            kind === "DeviceN" && Array.isArray(nameObj)
+              ? new Array(nameObj.length).fill(1.0)
+              : [1.0];
+          const numOut =
+            alternateSpace === "DeviceCMYK"
+              ? 4
+              : alternateSpace === "DeviceGray"
+                ? 1
+                : 3;
+          const dest = new Float32Array(numOut);
+          tintFn(inputs, 0, dest, 0);
+          solid = Array.from(dest);
+        } catch {
+          solid = [];
+        }
+        if (kind === "Separation") {
+          out[key] = {
+            kind: "separation",
+            name: nameObj?.name ?? String(nameObj ?? key),
+            alternateSpace,
+            solid,
+          };
+        } else {
+          const names = Array.isArray(nameObj)
+            ? nameObj.map(n => n?.name ?? String(n ?? ""))
+            : [nameObj?.name ?? String(nameObj ?? "")];
+          out[key] = {
+            kind: "deviceN",
+            names,
+            alternateSpace,
+            solid,
+          };
+        }
+      } catch {
+        // Skip malformed entries silently; the resulting missing spot
+        // color (if any) is reported by the consumer.
+      }
+    }
+    return shadow(this, "colorSpaceResources", out);
   }
 
   get userUnit() {

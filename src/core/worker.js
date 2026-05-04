@@ -11,6 +11,11 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Modifications by IMG.LY GmbH (https://github.com/imgly/pdf.js):
+ * WorkerMessageHandler.GetPage forwards trimBox, bleedBox,
+ * colorSpaceResources, and imglyPatchVersion. See README of
+ * imgly/pdf.js for details.
  */
 
 import {
@@ -396,13 +401,29 @@ class WorkerMessageHandler {
           pdfManager.ensure(page, "ref"),
           pdfManager.ensure(page, "userUnit"),
           pdfManager.ensure(page, "view"),
-        ]).then(function ([rotate, ref, userUnit, view]) {
+          // imgly: forward fork-only fields (see scripts/check-patches.sh).
+          pdfManager.ensure(page, "trimBox"),
+          pdfManager.ensure(page, "bleedBox"),
+          pdfManager.ensure(page, "colorSpaceResources"),
+        ]).then(function ([
+          rotate,
+          ref,
+          userUnit,
+          view,
+          trimBox,
+          bleedBox,
+          colorSpaceResources,
+        ]) {
           return {
             rotate,
             ref,
             refStr: ref?.toString() ?? null,
             userUnit,
             view,
+            trimBox,
+            bleedBox,
+            colorSpaceResources,
+            imglyPatchVersion: 2,
           };
         });
       });

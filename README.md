@@ -1,137 +1,92 @@
-# PDF.js [![Build Status](https://github.com/mozilla/pdf.js/workflows/CI/badge.svg?branch=master)](https://github.com/mozilla/pdf.js/actions?query=workflow%3ACI+branch%3Amaster)
+# `@imgly/pdfjs-dist` — fork of mozilla/pdf.js
 
-[PDF.js](https://mozilla.github.io/pdf.js/) is a Portable Document Format (PDF) viewer that is built with HTML5.
+This repository is a fork of [mozilla/pdf.js](https://github.com/mozilla/pdf.js)
+maintained by IMG.LY. It exists solely to surface a small set of additional
+fields on `PDFPageProxy` (page boxes, Separation/DeviceN color spaces, raw
+CMYK fills) that [`@imgly/pdf-importer`](https://www.npmjs.com/package/@imgly/pdf-importer)
+needs and that upstream pdf.js does not expose.
 
-PDF.js is community-driven and supported by Mozilla. Our goal is to
-create a general-purpose, web standards-based platform for parsing and
-rendering PDFs.
+The build output is published to npm as
+[`@imgly/pdfjs-dist`](https://www.npmjs.com/package/@imgly/pdfjs-dist).
 
-## Contributing
+For upstream documentation see [`README.upstream.md`](./README.upstream.md).
 
-PDF.js is an open source project and always looking for more contributors. To
-get involved, visit:
+## What the patches do
 
-+ [Issue Reporting Guide](https://github.com/mozilla/pdf.js/blob/master/.github/CONTRIBUTING.md)
-+ [Code Contribution Guide](https://github.com/mozilla/pdf.js/wiki/Contributing)
-+ [Frequently Asked Questions](https://github.com/mozilla/pdf.js/wiki/Frequently-Asked-Questions)
-+ [Good Beginner Bugs](https://github.com/mozilla/pdf.js/issues?direction=desc&labels=good-beginner-bug&page=1&sort=created&state=open)
-+ [Projects](https://github.com/mozilla/pdf.js/projects)
+Four commits, prefix `imgly:`, on each release branch (`imgly/v<upstream>`):
 
-Feel free to stop by our [Matrix room](https://chat.mozilla.org/#/room/#pdfjs:mozilla.org) for questions or guidance.
+1. **`src/display/api.js`** — add `PDFPageProxy.trimBox`, `bleedBox`,
+   `colorSpaceResources`, `imglyPatchVersion` getters reading from
+   `_pageInfo`.
+2. **`src/core/evaluator.js`** — track `fillColorSpaceKey` and
+   `strokeColorSpaceKey` in the operator walker; preserve raw CMYK args
+   instead of converting to RGB; emit Separation/DeviceN args with the
+   resource key appended so the consumer can resolve the ink name.
+3. **`src/core/document.js`** — add `Page.trimBox`, `bleedBox`, and
+   `colorSpaceResources` getters. The last one walks `/ColorSpace` and
+   evaluates each Separation/DeviceN tint=1 against its alternate space
+   via `PDFFunctionFactory`, returning a flat JSON-safe descriptor.
+4. **`src/core/worker.js`** — forward the three new page fields plus
+   `imglyPatchVersion: 2` across the worker boundary in
+   `WorkerMessageHandler.GetPage`.
 
-## Getting Started
+The version marker (`imglyPatchVersion`) is read by `@imgly/pdf-importer`
+at parse time. If it's missing or out of date the importer fails fast
+with a loud error rather than producing silently degraded output.
 
-### Online demo
+## Repository layout
 
-Please note that the "Modern browsers" version assumes native support for the
-latest JavaScript features; please also see [this wiki page](https://github.com/mozilla/pdf.js/wiki/Frequently-Asked-Questions#faq-support).
+- `master` — mirror of upstream `mozilla/pdf.js`.
+- `imgly/v<upstream>` — release branch. Branched off the upstream tag
+  `v<upstream>` with the four `imgly:` commits replayed on top.
+- `scripts/check-patches.sh` — minimal grep guardrail; run after every
+  rebase to confirm the patched markers still exist in source.
 
-+ Modern browsers: https://mozilla.github.io/pdf.js/web/viewer.html
+## Per-release runbook
 
-+ Older browsers: https://mozilla.github.io/pdf.js/legacy/web/viewer.html
+Each new pdf.js version we want to consume:
 
-### Browser Extensions
+```sh
+git fetch upstream --tags
+git checkout -b imgly/v<NEW> v<NEW>
+git cherry-pick <first-imgly-commit>..<last-imgly-commit>   # from prev release branch
+# Resolve any conflicts (always in src/{display/api,core/evaluator,core/document,core/worker}.js)
 
-#### Firefox
+./scripts/check-patches.sh
 
-PDF.js is built into version 19+ of Firefox.
+npm install
+npx gulp dist
+grep -q imglyPatchVersion build/dist/legacy/build/pdf.worker.mjs
 
-#### Chrome
+cd build/dist
+node -e '
+  const fs = require("fs");
+  const p = JSON.parse(fs.readFileSync("package.json", "utf8"));
+  p.name = "@imgly/pdfjs-dist";
+  p.version = "<NEW>-imgly.1";
+  p.repository = { type: "git", url: "https://github.com/imgly/pdf.js" };
+  fs.writeFileSync("package.json", JSON.stringify(p, null, 2));
+'
+npm publish --access public
+```
 
-+ The official extension for Chrome can be installed from the [Chrome Web Store](https://chrome.google.com/webstore/detail/pdf-viewer/oemmndcbldboiebfnladdacbdfmadadm).
-*This extension is maintained by [@Rob--W](https://github.com/Rob--W).*
-+ Build Your Own - Get the code as explained below and issue `npx gulp chromium`. Then open
-Chrome, go to `Tools > Extension` and load the (unpackaged) extension from the
-directory `build/chromium`.
+Then in the `@imgly/pdf-importer` consumer: bump the
+`@imgly/pdfjs-dist` dependency to the new version, run the regression
+suite.
 
-## Getting the Code
+## When to bump `imglyPatchVersion`
 
-To get a local copy of the current code, clone it using git:
+Bump the integer (currently `2` in `src/core/worker.js`) **whenever the
+shape of any patched field changes** (e.g. new key in
+`colorSpaceResources` entries, new `solid` semantics, etc.). The
+consumer's `EXPECTED_PATCH_VERSION` constant must be updated in
+lockstep — the runtime check is your only safety net for semantic
+drift.
 
-    $ git clone https://github.com/mozilla/pdf.js.git
-    $ cd pdf.js
+Do NOT bump on a routine rebase that doesn't change observable
+semantics.
 
-Next, install Node.js via the [official package](https://nodejs.org) or via
-[nvm](https://github.com/creationix/nvm). If everything worked out, install
-all dependencies for PDF.js:
+## License
 
-    $ npm install
-
-Finally, you need to start a local web server as some browsers do not allow opening
-PDF files using a `file://` URL. Run:
-
-    $ npx gulp server
-
-and then you can open:
-
-+ http://localhost:8888/web/viewer.html
-
-Please keep in mind that this assumes the latest version of Mozilla Firefox; refer to [Building PDF.js](https://github.com/mozilla/pdf.js/blob/master/README.md#building-pdfjs) for non-development usage of the PDF.js library.
-
-It is also possible to view all test PDF files on the right side by opening:
-
-+ http://localhost:8888/test/pdfs/?frame
-
-## Building PDF.js
-
-In order to bundle all `src/` files into two production scripts and build the generic
-viewer, run:
-
-    $ npx gulp generic
-
-If you need to support older browsers, run:
-
-    $ npx gulp generic-legacy
-
-This will generate `pdf.js` and `pdf.worker.js` in the `build/generic/build/` directory (respectively `build/generic-legacy/build/`).
-Both scripts are needed but only `pdf.js` needs to be included since `pdf.worker.js` will
-be loaded by `pdf.js`. The PDF.js files are large and should be minified for production.
-
-## Using PDF.js in a web application
-
-To use PDF.js in a web application you can choose to use a pre-built version of the library
-or to build it from source. We supply pre-built versions for usage with NPM under
-the `pdfjs-dist` name. For more information and examples please refer to the
-[wiki page](https://github.com/mozilla/pdf.js/wiki/Setup-pdf.js-in-a-website) on this subject.
-
-## Including via a CDN
-
-PDF.js is hosted on several free CDNs:
- - https://www.jsdelivr.com/package/npm/pdfjs-dist
- - https://cdnjs.com/libraries/pdf.js
- - https://unpkg.com/pdfjs-dist/
-
-## Learning
-
-You can play with the PDF.js API directly from your browser using the live demos below:
-
-+ [Interactive examples](https://mozilla.github.io/pdf.js/examples/index.html#interactive-examples)
-
-More examples can be found in the [examples folder](https://github.com/mozilla/pdf.js/tree/master/examples/). Some of them are using the pdfjs-dist package, which can be built and installed in this repo directory via `npx gulp dist-install` command.
-
-For an introduction to the PDF.js code, check out the presentation by our
-contributor Julian Viereck:
-
-+ https://www.youtube.com/watch?v=Iv15UY-4Fg8
-
-More learning resources can be found at:
-
-+ https://github.com/mozilla/pdf.js/wiki/Additional-Learning-Resources
-
-The API documentation can be found at:
-
-+ https://mozilla.github.io/pdf.js/api/
-
-## Questions
-
-Check out our FAQs and get answers to common questions:
-
-+ https://github.com/mozilla/pdf.js/wiki/Frequently-Asked-Questions
-
-Talk to us on Matrix:
-
-+ https://chat.mozilla.org/#/room/#pdfjs:mozilla.org
-
-File an issue:
-
-+ https://github.com/mozilla/pdf.js/issues/new/choose
+Apache 2.0, inherited from upstream pdf.js. This is a modified fork.
+See [`LICENSE`](./LICENSE).

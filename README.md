@@ -55,20 +55,28 @@ git cherry-pick <first-imgly-commit>..<last-imgly-commit>   # from prev release 
 ./scripts/check-patches.sh
 
 npm install
-npx gulp dist
+npx gulp dist                                 # IMGLY_PATCH_REVISION=1 by default
 grep -q imglyPatchVersion build/dist/legacy/build/pdf.worker.mjs
 
 cd build/dist
-node -e '
-  const fs = require("fs");
-  const p = JSON.parse(fs.readFileSync("package.json", "utf8"));
-  p.name = "@imgly/pdfjs-dist";
-  p.version = "<NEW>-imgly.1";
-  p.repository = { type: "git", url: "https://github.com/imgly/pdf.js" };
-  fs.writeFileSync("package.json", JSON.stringify(p, null, 2));
-'
-npm publish --access public
+npm publish --access public --tag latest
 ```
+
+`gulp dist` writes a manifest with name `@imgly/pdfjs-dist`, version
+`<UPSTREAM>-imgly.<rev>`, and the IMG.LY repository URLs (see
+`packageJson()` in `gulpfile.mjs`). The upstream version comes from the
+nearest `v*.*.*` tag reachable from `HEAD`; `<rev>` defaults to `1`.
+
+When **republishing the same upstream tag** (e.g. fixing a missed hunk on
+top of `imgly/v4.10.38`) bump the revision:
+
+```sh
+IMGLY_PATCH_REVISION=2 npx gulp dist
+cd build/dist && npm publish --access public --tag latest
+```
+
+If you forget, npm refuses the second publish (version already exists),
+which is a safer failure than overwriting the previous tarball.
 
 Then in the `@imgly/pdf-importer` consumer: bump the
 `@imgly/pdfjs-dist` dependency to the new version, run the regression

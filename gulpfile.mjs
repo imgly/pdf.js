@@ -2230,14 +2230,43 @@ gulp.task(
 );
 
 function packageJson() {
-  const VERSION = getVersionJSON().version;
+  // imgly: emit a fork-scoped manifest so the published tarball is correct
+  // out of the box. The version is `<upstream>-imgly.<rev>` where:
+  //   - <upstream> comes from the most recent v*.*.* git tag reachable
+  //     from HEAD (e.g. `v4.10.38` → `4.10.38`). Release branches
+  //     (`imgly/v<UPSTREAM>`) branch off that tag, so this gives the
+  //     correct anchor automatically.
+  //   - <rev> is the IMGLY_PATCH_REVISION env var, defaulting to 1.
+  //     Bump it when republishing the same upstream tag, e.g.
+  //
+  //       IMGLY_PATCH_REVISION=2 npx gulp dist
+  //
+  //     If you forget, npm refuses the second publish (version already
+  //     exists), which is a safer failure than overwriting -imgly.1.
+  let upstreamVersion;
+  try {
+    upstreamVersion = execSync(
+      "git describe --tags --abbrev=0 --match='v*.*.*'"
+    )
+      .toString()
+      .trim()
+      .replace(/^v/, "");
+  } catch {
+    // Fallback to the upstream-derived version (commits-since-baseVersion).
+    // Only hit during a non-git build; normal `npx gulp dist` will use
+    // the tag.
+    upstreamVersion = getVersionJSON().version;
+  }
+  const patchRevision = process.env.IMGLY_PATCH_REVISION || "1";
+  const VERSION = `${upstreamVersion}-imgly.${patchRevision}`;
 
-  const DIST_NAME = "pdfjs-dist";
-  const DIST_DESCRIPTION = "Generic build of Mozilla's PDF.js library.";
-  const DIST_KEYWORDS = ["Mozilla", "pdf", "pdf.js"];
-  const DIST_HOMEPAGE = "https://mozilla.github.io/pdf.js/";
-  const DIST_BUGS_URL = "https://github.com/mozilla/pdf.js/issues";
-  const DIST_GIT_URL = "https://github.com/mozilla/pdf.js.git";
+  const DIST_NAME = "@imgly/pdfjs-dist";
+  const DIST_DESCRIPTION =
+    "IMG.LY fork of pdfjs-dist with patches for @imgly/pdf-importer.";
+  const DIST_KEYWORDS = ["Mozilla", "pdf", "pdf.js", "imgly", "fork"];
+  const DIST_HOMEPAGE = "https://github.com/imgly/pdf.js#readme";
+  const DIST_BUGS_URL = "https://github.com/imgly/pdf.js/issues";
+  const DIST_GIT_URL = "https://github.com/imgly/pdf.js.git";
   const DIST_LICENSE = "Apache-2.0";
 
   const npmManifest = {

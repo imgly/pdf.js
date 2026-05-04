@@ -11,6 +11,10 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Modifications by IMG.LY GmbH (https://github.com/imgly/pdf.js):
+ * added PDFPageProxy.{trimBox,bleedBox,colorSpaceResources,imglyPatchVersion}
+ * getters reading from _pageInfo. See README of imgly/pdf.js for details.
  */
 
 /**
@@ -1373,6 +1377,57 @@ class PDFPageProxy {
    */
   get view() {
     return this._pageInfo.view;
+  }
+
+  /**
+   * @type {Array<number> | null} The TrimBox in user space units
+   *   [x1, y1, x2, y2], or null if not declared. Surfaced by the @imgly
+   *   fork of pdfjs-dist; see scripts/check-patches.sh.
+   */
+  get trimBox() {
+    return this._pageInfo.trimBox ?? null;
+  }
+
+  /**
+   * @type {Array<number> | null} The BleedBox in user space units
+   *   [x1, y1, x2, y2], or null if not declared. Surfaced by the @imgly
+   *   fork of pdfjs-dist; see scripts/check-patches.sh.
+   */
+  get bleedBox() {
+    return this._pageInfo.bleedBox ?? null;
+  }
+
+  /**
+   * Resolved /ColorSpace resource entries, keyed by local resource name
+   * (e.g. "CS1"). Only Separation and DeviceN entries are included; other
+   * color spaces resolve through pdf.js's normal operator path. Each entry
+   * carries the ink name(s), alternate color space, and the tint=1 solid
+   * evaluated against the alternate space's component range. Surfaced by
+   * the @imgly fork of pdfjs-dist; see scripts/check-patches.sh.
+   *
+   * @type {Record<string,
+   *   { kind: "separation",
+   *     name: string,
+   *     alternateSpace: "DeviceCMYK" | "DeviceRGB" | "DeviceGray",
+   *     solid: number[] }
+   *   |
+   *   { kind: "deviceN",
+   *     names: string[],
+   *     alternateSpace: "DeviceCMYK" | "DeviceRGB" | "DeviceGray",
+   *     solid: number[] }
+   * >}
+   */
+  get colorSpaceResources() {
+    return this._pageInfo.colorSpaceResources ?? {};
+  }
+
+  /**
+   * @type {number | null} Revision of the IMG.LY patch applied to this
+   *   pdfjs build. Read by @imgly/pdf-importer to fail fast when the
+   *   patch is missing or out of date. `null` if unpatched.
+   */
+  get imglyPatchVersion() {
+    return this._pageInfo.imglyPatchVersion ?? null;
   }
 
   /**

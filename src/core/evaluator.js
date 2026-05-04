@@ -11,6 +11,11 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Modifications by IMG.LY GmbH (https://github.com/imgly/pdf.js):
+ * PartialEvaluator preserves raw CMYK args and Separation/DeviceN
+ * resource keys (fillColorSpaceKey/strokeColorSpaceKey) instead of
+ * converting to RGB. See README of imgly/pdf.js for details.
  */
 
 import {
@@ -1987,6 +1992,11 @@ class PartialEvaluator {
             break;
 
           case OPS.setFillColorSpace: {
+            // imgly: remember the raw resource key (e.g. "CS1") so a
+            // downstream setFillColorN can emit it for consumers that
+            // resolve Separation/DeviceN names via
+            // PDFPageProxy.colorSpaceResources.
+            const csKey = args[0]?.name ?? args[0];
             const cachedColorSpace = ColorSpace.getCached(
               args[0],
               xref,
@@ -1994,6 +2004,7 @@ class PartialEvaluator {
             );
             if (cachedColorSpace) {
               stateManager.state.fillColorSpace = cachedColorSpace;
+              stateManager.state.fillColorSpaceKey = csKey;
               continue;
             }
 
@@ -2007,11 +2018,14 @@ class PartialEvaluator {
                 .then(function (colorSpace) {
                   stateManager.state.fillColorSpace =
                     colorSpace || ColorSpace.singletons.gray;
+                  stateManager.state.fillColorSpaceKey = csKey;
                 })
             );
             return;
           }
           case OPS.setStrokeColorSpace: {
+            // imgly: see setFillColorSpace.
+            const csKey = args[0]?.name ?? args[0];
             const cachedColorSpace = ColorSpace.getCached(
               args[0],
               xref,
@@ -2019,6 +2033,7 @@ class PartialEvaluator {
             );
             if (cachedColorSpace) {
               stateManager.state.strokeColorSpace = cachedColorSpace;
+              stateManager.state.strokeColorSpaceKey = csKey;
               continue;
             }
 
@@ -2032,6 +2047,7 @@ class PartialEvaluator {
                 .then(function (colorSpace) {
                   stateManager.state.strokeColorSpace =
                     colorSpace || ColorSpace.singletons.gray;
+                  stateManager.state.strokeColorSpaceKey = csKey;
                 })
             );
             return;
@@ -2058,13 +2074,16 @@ class PartialEvaluator {
             break;
           case OPS.setFillCMYKColor:
             stateManager.state.fillColorSpace = ColorSpace.singletons.cmyk;
-            args = ColorSpace.singletons.cmyk.getRgb(args, 0);
-            fn = OPS.setFillRGBColor;
+            // imgly: preserve raw CMYK args so a high-fidelity consumer
+            // (@imgly/pdf-importer) can route them to a native CMYK
+            // fill. Standard pdf.js canvas rendering never re-enters
+            // this branch because it reads `fnArray` sequentially.
+            args = [args[0], args[1], args[2], args[3]];
             break;
           case OPS.setStrokeCMYKColor:
             stateManager.state.strokeColorSpace = ColorSpace.singletons.cmyk;
-            args = ColorSpace.singletons.cmyk.getRgb(args, 0);
-            fn = OPS.setStrokeRGBColor;
+            // imgly: see setFillCMYKColor.
+            args = [args[0], args[1], args[2], args[3]];
             break;
           case OPS.setFillRGBColor:
             stateManager.state.fillColorSpace = ColorSpace.singletons.rgb;
@@ -2103,6 +2122,17 @@ class PartialEvaluator {
               );
               return;
             }
+            if (cs.name === "Alternate") {
+              // imgly: Separation / DeviceN. Preserve the raw tint
+              // components and append the /ColorSpace resource key so
+              // a high-fidelity consumer can resolve the ink name +
+              // CMYK alternate from PDFPageProxy.colorSpaceResources.
+              // Canvas rendering in pdf.js doesn't reach this branch
+              // since fnArray is read in order; the RGB fallback below
+              // still applies if the consumer ignores setFillColorN.
+              args = [...args, stateManager.state.fillColorSpaceKey ?? null];
+              break;
+            }
             args = cs.getRgb(args, 0);
             fn = OPS.setFillRGBColor;
             break;
@@ -2134,6 +2164,11 @@ class PartialEvaluator {
                 )
               );
               return;
+            }
+            if (cs.name === "Alternate") {
+              // imgly: see setFillColorN.
+              args = [...args, stateManager.state.strokeColorSpaceKey ?? null];
+              break;
             }
             args = cs.getRgb(args, 0);
             fn = OPS.setStrokeRGBColor;

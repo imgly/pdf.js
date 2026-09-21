@@ -74,6 +74,7 @@ import { FontFlags } from "./fonts_utils.js";
 import { getFontSubstitution } from "./font_substitutions.js";
 import { getGlyphsUnicode } from "./glyphlist.js";
 import { getMetrics } from "./metrics.js";
+import { getRawImageData } from "./raw_image.js";
 import { getUnicodeForGlyph } from "./unicode.js";
 import { ImageResizer } from "./image_resizer.js";
 import { JpegStream } from "./jpeg_stream.js";
@@ -89,6 +90,7 @@ const DefaultPartialEvaluatorOptions = Object.freeze({
   isEvalSupported: true,
   isOffscreenCanvasSupported: false,
   isImageDecoderSupported: false,
+  exposeRawImageData: false,
   canvasMaxAreaInBytes: -1,
   fontExtraProperties: false,
   useSystemFonts: true,
@@ -755,6 +757,22 @@ class PartialEvaluator {
         );
         operatorList.isOffscreenCanvasSupported =
           this.options.isOffscreenCanvasSupported;
+        if (this.options.exposeRawImageData) {
+          try {
+            imgData.rawImage = getRawImageData({
+              imageObj,
+              xref: this.xref,
+              resources,
+            });
+          } catch (reason) {
+            warn(`Unable to expose raw inline image: "${reason}".`);
+            imgData.rawImage = {
+              version: 1,
+              eligible: false,
+              reason: "EXTRACTION_FAILED",
+            };
+          }
+        }
         operatorList.addImageOps(
           OPS.paintInlineImageXObject,
           [imgData],
@@ -859,6 +877,22 @@ class PartialEvaluator {
           ? imgData.width * imgData.height * 4
           : imgData.data.length;
         imgData.ref = imageRef;
+        if (this.options.exposeRawImageData) {
+          try {
+            imgData.rawImage = getRawImageData({
+              imageObj,
+              xref: this.xref,
+              resources: isInline ? resources : null,
+            });
+          } catch (reason) {
+            warn(`Unable to expose raw image "${objId}": "${reason}".`);
+            imgData.rawImage = {
+              version: 1,
+              eligible: false,
+              reason: "EXTRACTION_FAILED",
+            };
+          }
+        }
 
         if (cacheGlobally) {
           this.globalImageCache.addByteSize(imageRef, imgData.dataLen);

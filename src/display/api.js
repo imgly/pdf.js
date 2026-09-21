@@ -179,7 +179,6 @@ const DefaultStandardFontDataFactory =
  *   `ImageDecoder` in the worker. Primarily used to improve performance of
  *   image conversion/rendering.
  *   The default value is `true` in web environments and `false` in Node.js.
- *
  *   NOTE: Also temporarily disabled in Chromium browsers, until we no longer
  *   support the affected browser versions, because of various bugs:
  *
@@ -190,6 +189,9 @@ const DefaultStandardFontDataFactory =
  *      colour profiles, e.g. GitHub discussion 19030;
  *      see https://issues.chromium.org/issues/378869810
  *
+ * @property {boolean} [exposeRawImageData=false] - Attach eligible raw DCT
+ *   streams and their PDF image semantics to resolved image objects. This
+ *   increases worker transfer and memory use; intended for importers.
  * @property {number} [canvasMaxAreaInBytes] - The integer value is used to
  *   know when an image must be resized (uses `OffscreenCanvas` in the worker).
  *   If it's -1 then a possibly slow algorithm is used to guess the max value.
@@ -310,6 +312,7 @@ function getDocument(src = {}) {
   const disableFontFace =
     typeof src.disableFontFace === "boolean" ? src.disableFontFace : isNodeJS;
   const fontExtraProperties = src.fontExtraProperties === true;
+  const exposeRawImageData = src.exposeRawImageData === true;
   const enableXfa = src.enableXfa === true;
   const ownerDocument = src.ownerDocument || globalThis.document;
   const disableRange = src.disableRange === true;
@@ -398,6 +401,7 @@ function getDocument(src = {}) {
       isImageDecoderSupported,
       canvasMaxAreaInBytes,
       fontExtraProperties,
+      exposeRawImageData,
       useSystemFonts,
       cMapUrl: useWorkerFetch ? cMapUrl : null,
       standardFontDataUrl: useWorkerFetch ? standardFontDataUrl : null,

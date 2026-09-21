@@ -894,6 +894,8 @@ class PartialEvaluator {
           }
         }
 
+        imgData.dataLen += imgData.rawImage?.data?.byteLength || 0;
+
         if (cacheGlobally) {
           this.globalImageCache.addByteSize(imageRef, imgData.dataLen);
         }

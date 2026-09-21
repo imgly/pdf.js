@@ -110,4 +110,12 @@ describe("raw image accessor", function () {
     expect(raw.reason).toBe("MASKED_IMAGE");
     expect(raw.mask.type).toBe("colorKey");
   });
+
+  it("rejects malformed DCT decode parameters", function () {
+    const raw = extract(
+      makeImage(Name.get("DeviceCMYK"), { DecodeParms: [null, null] })
+    );
+    expect(raw.eligible).toBeFalse();
+    expect(raw.reason).toBe("INVALID_DECODE_PARMS");
+  });
 });

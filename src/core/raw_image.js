@@ -13,9 +13,9 @@
  * limitations under the License.
  */
 
+import { Dict, Name } from "./primitives.js";
 import { BaseStream } from "./base_stream.js";
 import { JpegStream } from "./jpeg_stream.js";
-import { Name } from "./primitives.js";
 
 const COMPONENTS = { DeviceGray: 1, DeviceRGB: 3, DeviceCMYK: 4 };
 const ICC_SIGNATURES = { 1: "GRAY", 3: "RGB ", 4: "CMYK" };
@@ -56,9 +56,13 @@ function resolveColorSpace(value, xref, resources) {
     return { name, n, invalid: true };
   }
   const previousPosition = stream.pos;
-  stream.reset();
-  const profile = stream.getBytes().slice();
-  stream.pos = previousPosition;
+  let profile;
+  try {
+    stream.reset();
+    profile = stream.getBytes().slice();
+  } finally {
+    stream.pos = previousPosition;
+  }
   const declaredLength =
     ((profile[0] << 24) |
       (profile[1] << 16) |
@@ -87,6 +91,12 @@ function getRawImageData({ imageObj, xref, resources }) {
   ).map(value => xref.fetchIfRef(value)?.name ?? null);
   const paramsValue = dict.get("DP", "DecodeParms");
   const params = Array.isArray(paramsValue) ? paramsValue[0] : paramsValue;
+  const validParams =
+    (paramsValue === undefined ||
+      paramsValue === null ||
+      paramsValue instanceof Dict ||
+      (Array.isArray(paramsValue) && paramsValue.length === 1)) &&
+    (params === undefined || params === null || params instanceof Dict);
   const colorTransform = params?.get?.("ColorTransform") ?? null;
   const rawColorSpace = dict.getRaw("CS") || dict.getRaw("ColorSpace");
   const colorSpace = resolveColorSpace(rawColorSpace, xref, resources);
@@ -124,9 +134,8 @@ function getRawImageData({ imageObj, xref, resources }) {
   } else if (imageObj.imageMask || mask || softMask || imageObj.matte) {
     reason = "MASKED_IMAGE";
   } else if (
-    colorTransform !== null &&
-    colorTransform !== 0 &&
-    colorTransform !== 1
+    !validParams ||
+    (colorTransform !== null && colorTransform !== 0 && colorTransform !== 1)
   ) {
     reason = "INVALID_DECODE_PARMS";
   } else if (!colorSpace || colorSpace.invalid) {

@@ -1,9 +1,9 @@
 # `@imgly/pdfjs-dist` — fork of mozilla/pdf.js
 
 This repository is a fork of [mozilla/pdf.js](https://github.com/mozilla/pdf.js)
-maintained by IMG.LY. It exists solely to surface a small set of additional
-fields on `PDFPageProxy` (page boxes, Separation/DeviceN color spaces, raw
-CMYK fills) that [`@imgly/pdf-importer`](https://www.npmjs.com/package/@imgly/pdf-importer)
+maintained by IMG.LY. It exposes importer-facing page metadata, raw JPEG image
+semantics, and PDF output intents that
+[`@imgly/pdf-importer`](https://www.npmjs.com/package/@imgly/pdf-importer)
 needs and that upstream pdf.js does not expose.
 
 The build output is published to npm as
@@ -13,11 +13,11 @@ For upstream documentation see [`README.upstream.md`](./README.upstream.md).
 
 ## What the patches do
 
-Four commits, prefix `imgly:`, on each release branch (`imgly/v<upstream>`):
+The fork patches on each release branch (`imgly/v<upstream>`) provide:
 
 1. **`src/display/api.js`** — add `PDFPageProxy.trimBox`, `bleedBox`,
-   `colorSpaceResources`, `imglyPatchVersion` getters reading from
-   `_pageInfo`.
+   `colorSpaceResources`, `imglyPatchVersion`, plus the document-level
+   `PDFDocumentProxy.getOutputIntents()` API.
 2. **`src/core/evaluator.js`** — track `fillColorSpaceKey` and
    `strokeColorSpaceKey` in the operator walker; preserve raw CMYK args
    instead of converting to RGB; emit Separation/DeviceN args with the
@@ -26,9 +26,16 @@ Four commits, prefix `imgly:`, on each release branch (`imgly/v<upstream>`):
    `colorSpaceResources` getters. The last one walks `/ColorSpace` and
    evaluates each Separation/DeviceN tint=1 against its alternate space
    via `PDFFunctionFactory`, returning a flat JSON-safe descriptor.
-4. **`src/core/worker.js`** — forward the three new page fields plus
-   `imglyPatchVersion: 2` across the worker boundary in
-   `WorkerMessageHandler.GetPage`.
+4. **`src/core/raw_image.js` and `src/core/evaluator.js`** — expose opt-in,
+   structured-cloneable raw DCT image descriptors with native-pass-through
+   eligibility and fallback diagnostics. See
+   [`docs/contents/api/raw-images.md`](./docs/contents/api/raw-images.md).
+5. **`src/core/catalog.js` and `src/core/worker.js`** — resolve
+   `/OutputIntents` and `/DestOutputProfile` across the worker boundary,
+   preferring `GTS_PDFX`. See
+   [`docs/contents/api/output-intents.md`](./docs/contents/api/output-intents.md).
+6. **`src/core/worker.js`** — forward the three new page fields plus
+   `imglyPatchVersion: 3` in `WorkerMessageHandler.GetPage`.
 
 The version marker (`imglyPatchVersion`) is read by `@imgly/pdf-importer`
 at parse time. If it's missing or out of date the importer fails fast
@@ -50,7 +57,7 @@ Each new pdf.js version we want to consume:
 git fetch upstream --tags
 git checkout -b imgly/v<NEW> v<NEW>
 git cherry-pick <first-imgly-commit>..<last-imgly-commit>   # from prev release branch
-# Resolve any conflicts (always in src/{display/api,core/evaluator,core/document,core/worker}.js)
+# Resolve any conflicts (commonly in src/{display/api,core/{catalog,document,evaluator,raw_image,worker}}.js)
 
 ./scripts/check-patches.sh
 
@@ -84,7 +91,7 @@ suite.
 
 ## When to bump `imglyPatchVersion`
 
-Bump the integer (currently `2` in `src/core/worker.js`) **whenever the
+Bump the integer (currently `3` in `src/core/worker.js`) **whenever the
 shape of any patched field changes** (e.g. new key in
 `colorSpaceResources` entries, new `solid` semantics, etc.). The
 consumer's `EXPECTED_PATCH_VERSION` constant must be updated in

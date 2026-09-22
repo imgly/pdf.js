@@ -423,7 +423,7 @@ class WorkerMessageHandler {
             trimBox,
             bleedBox,
             colorSpaceResources,
-            imglyPatchVersion: 2,
+            imglyPatchVersion: 3,
           };
         });
       });
@@ -497,6 +497,10 @@ class WorkerMessageHandler {
 
     handler.on("GetMarkInfo", function (data) {
       return pdfManager.ensureCatalog("markInfo");
+    });
+
+    handler.on("GetOutputIntents", function (data) {
+      return pdfManager.ensureCatalog("outputIntents");
     });
 
     handler.on("GetData", function (data) {

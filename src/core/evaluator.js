@@ -74,6 +74,7 @@ import { FontFlags } from "./fonts_utils.js";
 import { getFontSubstitution } from "./font_substitutions.js";
 import { getGlyphsUnicode } from "./glyphlist.js";
 import { getMetrics } from "./metrics.js";
+import { getRawImageData } from "./raw_image.js";
 import { getUnicodeForGlyph } from "./unicode.js";
 import { ImageResizer } from "./image_resizer.js";
 import { JpegStream } from "./jpeg_stream.js";
@@ -89,6 +90,7 @@ const DefaultPartialEvaluatorOptions = Object.freeze({
   isEvalSupported: true,
   isOffscreenCanvasSupported: false,
   isImageDecoderSupported: false,
+  exposeRawImageData: false,
   canvasMaxAreaInBytes: -1,
   fontExtraProperties: false,
   useSystemFonts: true,
@@ -747,6 +749,23 @@ class PartialEvaluator {
           pdfFunctionFactory: this._pdfFunctionFactory,
           localColorSpaceCache,
         });
+        let rawImage = null;
+        if (this.options.exposeRawImageData) {
+          try {
+            rawImage = getRawImageData({
+              imageObj,
+              xref: this.xref,
+              resources,
+            });
+          } catch (reason) {
+            warn(`Unable to expose raw inline image: "${reason}".`);
+            rawImage = {
+              version: 1,
+              eligible: false,
+              reason: "EXTRACTION_FAILED",
+            };
+          }
+        }
         // We force the use of RGBA_32BPP images here, because we can't handle
         // any other kind.
         imgData = await imageObj.createImageData(
@@ -755,6 +774,9 @@ class PartialEvaluator {
         );
         operatorList.isOffscreenCanvasSupported =
           this.options.isOffscreenCanvasSupported;
+        if (this.options.exposeRawImageData) {
+          imgData.rawImage = rawImage;
+        }
         operatorList.addImageOps(
           OPS.paintInlineImageXObject,
           [imgData],
@@ -850,6 +872,23 @@ class PartialEvaluator {
       localColorSpaceCache,
     })
       .then(async imageObj => {
+        let rawImage = null;
+        if (this.options.exposeRawImageData) {
+          try {
+            rawImage = getRawImageData({
+              imageObj,
+              xref: this.xref,
+              resources,
+            });
+          } catch (reason) {
+            warn(`Unable to expose raw image "${objId}": "${reason}".`);
+            rawImage = {
+              version: 1,
+              eligible: false,
+              reason: "EXTRACTION_FAILED",
+            };
+          }
+        }
         imgData = await imageObj.createImageData(
           /* forceRGBA = */ false,
           /* isOffscreenCanvasSupported = */ this.options
@@ -859,6 +898,11 @@ class PartialEvaluator {
           ? imgData.width * imgData.height * 4
           : imgData.data.length;
         imgData.ref = imageRef;
+        if (this.options.exposeRawImageData) {
+          imgData.rawImage = rawImage;
+        }
+
+        imgData.dataLen += imgData.rawImage?.bytes?.byteLength || 0;
 
         if (cacheGlobally) {
           this.globalImageCache.addByteSize(imageRef, imgData.dataLen);

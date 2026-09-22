@@ -8,6 +8,9 @@ grep -q "imglyPatchVersion" src/display/api.js
 grep -q "fillColorSpaceKey" src/core/evaluator.js
 grep -q "get colorSpaceResources" src/core/document.js
 grep -q "imglyPatchVersion" src/core/worker.js
+grep -q "GetOutputIntents" src/core/worker.js
+grep -q "getOutputIntents" src/display/api.js
+grep -q "getRawImageData" src/core/evaluator.js
 # Build-config patch (otherwise `gulp dist` republishes under the
 # upstream `pdfjs-dist` name with Mozilla URLs).
 grep -q "@imgly/pdfjs-dist" gulpfile.mjs

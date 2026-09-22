@@ -1033,6 +1033,14 @@ class PDFDocumentProxy {
   }
 
   /**
+   * @returns {Promise<{intents: Array<Object>, selected: Object | null}>}
+   * A structured-cloneable description of the document output intents.
+   */
+  getOutputIntents() {
+    return this._transport.getOutputIntents();
+  }
+
+  /**
    * @typedef {Object} MarkInfo
    * Properties correspond to Table 321 of the PDF 32000-1:2008 spec.
    * @property {boolean} Marked
@@ -3163,6 +3171,10 @@ class WorkerTransport {
 
   getMarkInfo() {
     return this.messageHandler.sendWithPromise("GetMarkInfo", null);
+  }
+
+  getOutputIntents() {
+    return this.#cacheSimpleMethod("GetOutputIntents");
   }
 
   async startCleanup(keepLoadedFonts = false) {

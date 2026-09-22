@@ -259,6 +259,79 @@ class Catalog {
     return shadow(this, "metadata", metadata);
   }
 
+  /**
+   * A structured-cloneable representation of the catalog /OutputIntents.
+   * This intentionally does not use image ICC profiles or default colour
+   * spaces: output intents are document-level PDF semantics.
+   */
+  get outputIntents() {
+    const rawIntents = this._catDict.getArray("OutputIntents") || [];
+    const intents = [];
+    const getString = (dict, key) => {
+      const value = dict.get(key);
+      return typeof value === "string" ? stringToPDFString(value) : null;
+    };
+    for (const rawIntent of rawIntents) {
+      const intent = this.xref.fetchIfRef(rawIntent);
+      if (!(intent instanceof Dict)) {
+        continue;
+      }
+      const subtype = intent.get("S");
+      let profile = null;
+      try {
+        const stream = intent.get("DestOutputProfile");
+        if (stream instanceof BaseStream) {
+          const components = stream.dict.get("N");
+          if ([1, 3, 4].includes(components)) {
+            const position = stream.pos;
+            try {
+              stream.reset();
+              const bytes = stream.getBytes().slice();
+              const length =
+                ((bytes[0] << 24) |
+                  (bytes[1] << 16) |
+                  (bytes[2] << 8) |
+                  bytes[3]) >>>
+                0;
+              // Do not publish malformed profiles as a usable output intent.
+              // The surrounding intent metadata remains observable.
+              if (
+                bytes.length >= 128 &&
+                length === bytes.length &&
+                String.fromCharCode(...bytes.subarray(36, 40)) === "acsp"
+              ) {
+                profile = bytes;
+              }
+            } finally {
+              stream.pos = position;
+            }
+          }
+        }
+      } catch (ex) {
+        if (ex instanceof MissingDataException) {
+          throw ex;
+        }
+        info(`Skipping invalid output intent profile: "${ex}".`);
+      }
+      intents.push({
+        subtype: subtype instanceof Name ? subtype.name : "",
+        outputCondition: getString(intent, "OutputCondition"),
+        outputConditionIdentifier: getString(
+          intent,
+          "OutputConditionIdentifier"
+        ),
+        registryName: getString(intent, "RegistryName"),
+        info: getString(intent, "Info"),
+        profile,
+      });
+    }
+    const selected =
+      intents.find(intent => intent.subtype === "GTS_PDFX") ||
+      intents[0] ||
+      null;
+    return shadow(this, "outputIntents", { intents, selected });
+  }
+
   get markInfo() {
     let markInfo = null;
     try {

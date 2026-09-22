@@ -499,6 +499,10 @@ class WorkerMessageHandler {
       return pdfManager.ensureCatalog("markInfo");
     });
 
+    handler.on("GetOutputIntents", function (data) {
+      return pdfManager.ensureCatalog("outputIntents");
+    });
+
     handler.on("GetData", function (data) {
       return pdfManager.requestLoadedStream().then(function (stream) {
         return stream.bytes;

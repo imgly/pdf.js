@@ -749,6 +749,23 @@ class PartialEvaluator {
           pdfFunctionFactory: this._pdfFunctionFactory,
           localColorSpaceCache,
         });
+        let rawImage = null;
+        if (this.options.exposeRawImageData) {
+          try {
+            rawImage = getRawImageData({
+              imageObj,
+              xref: this.xref,
+              resources,
+            });
+          } catch (reason) {
+            warn(`Unable to expose raw inline image: "${reason}".`);
+            rawImage = {
+              version: 1,
+              eligible: false,
+              reason: "EXTRACTION_FAILED",
+            };
+          }
+        }
         // We force the use of RGBA_32BPP images here, because we can't handle
         // any other kind.
         imgData = await imageObj.createImageData(
@@ -758,20 +775,7 @@ class PartialEvaluator {
         operatorList.isOffscreenCanvasSupported =
           this.options.isOffscreenCanvasSupported;
         if (this.options.exposeRawImageData) {
-          try {
-            imgData.rawImage = getRawImageData({
-              imageObj,
-              xref: this.xref,
-              resources,
-            });
-          } catch (reason) {
-            warn(`Unable to expose raw inline image: "${reason}".`);
-            imgData.rawImage = {
-              version: 1,
-              eligible: false,
-              reason: "EXTRACTION_FAILED",
-            };
-          }
+          imgData.rawImage = rawImage;
         }
         operatorList.addImageOps(
           OPS.paintInlineImageXObject,
@@ -868,6 +872,23 @@ class PartialEvaluator {
       localColorSpaceCache,
     })
       .then(async imageObj => {
+        let rawImage = null;
+        if (this.options.exposeRawImageData) {
+          try {
+            rawImage = getRawImageData({
+              imageObj,
+              xref: this.xref,
+              resources,
+            });
+          } catch (reason) {
+            warn(`Unable to expose raw image "${objId}": "${reason}".`);
+            rawImage = {
+              version: 1,
+              eligible: false,
+              reason: "EXTRACTION_FAILED",
+            };
+          }
+        }
         imgData = await imageObj.createImageData(
           /* forceRGBA = */ false,
           /* isOffscreenCanvasSupported = */ this.options
@@ -878,23 +899,10 @@ class PartialEvaluator {
           : imgData.data.length;
         imgData.ref = imageRef;
         if (this.options.exposeRawImageData) {
-          try {
-            imgData.rawImage = getRawImageData({
-              imageObj,
-              xref: this.xref,
-              resources: isInline ? resources : null,
-            });
-          } catch (reason) {
-            warn(`Unable to expose raw image "${objId}": "${reason}".`);
-            imgData.rawImage = {
-              version: 1,
-              eligible: false,
-              reason: "EXTRACTION_FAILED",
-            };
-          }
+          imgData.rawImage = rawImage;
         }
 
-        imgData.dataLen += imgData.rawImage?.data?.byteLength || 0;
+        imgData.dataLen += imgData.rawImage?.bytes?.byteLength || 0;
 
         if (cacheGlobally) {
           this.globalImageCache.addByteSize(imageRef, imgData.dataLen);

@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import { Dict, Name } from "./primitives.js";
+import { Dict, isName, Name } from "./primitives.js";
 import { BaseStream } from "./base_stream.js";
 import { JpegStream } from "./jpeg_stream.js";
 
@@ -133,7 +133,9 @@ function resolveEffectiveColorSpace(
 }
 
 function decodeParms(dict, xref) {
-  const value = dict.getRaw("DP") ?? dict.getRaw("DecodeParms");
+  const value = xref.fetchIfRef(
+    dict.getRaw("DP") ?? dict.getRaw("DecodeParms")
+  );
   if (value === undefined) {
     return null;
   }
@@ -151,7 +153,7 @@ function rawMask(value, kind, xref, resources) {
     return { kind, reason: "UNSUPPORTED_COMPOSITING" };
   }
   const dict = stream.dict;
-  if (kind === "softMask" && dict.get("Subtype") instanceof Name) {
+  if (kind === "softMask" && isName(dict.get("Subtype"), "Form")) {
     const group = dict.get("Group");
     const subtype = dict.get("S");
     return {
@@ -178,6 +180,7 @@ function rawMask(value, kind, xref, resources) {
     filters,
     decodeParms: decodeParms(dict, xref),
     decode: dict.getArray("D", "Decode") || null,
+    matte: dict.getArray("Matte") || null,
     width: dict.get("W", "Width") ?? null,
     height: dict.get("H", "Height") ?? null,
     bitsPerComponent: dict.get("BPC", "BitsPerComponent") ?? null,
@@ -208,6 +211,9 @@ function getRawImageData({ imageObj, xref, resources }) {
   const maskValue = dict.getRaw("Mask"),
     softMaskValue = dict.getRaw("SMask");
   const matte = dict.getArray("Matte") || null;
+  const softMask = softMaskValue
+    ? rawMask(softMaskValue, "softMask", xref, resources)
+    : null;
   const result = {
     version: 1,
     eligible: false,
@@ -223,10 +229,8 @@ function getRawImageData({ imageObj, xref, resources }) {
     sourceColorSpace,
     effectiveColorSpace,
     mask: maskValue ? rawMask(maskValue, "image", xref, resources) : null,
-    softMask: softMaskValue
-      ? rawMask(softMaskValue, "softMask", xref, resources)
-      : null,
-    matte,
+    softMask,
+    matte: softMask?.matte || matte,
   };
   const paramsValid =
     result.decodeParms === null ||

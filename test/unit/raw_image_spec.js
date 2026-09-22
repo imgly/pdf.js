@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import { Dict, Name } from "../../src/core/primitives.js";
+import { Dict, Name, Ref } from "../../src/core/primitives.js";
 import { getRawImageData } from "../../src/core/raw_image.js";
 import { JpegStream } from "../../src/core/jpeg_stream.js";
 import { Stream } from "../../src/core/stream.js";
@@ -134,5 +134,71 @@ describe("raw image accessor", function () {
     );
     expect(raw.eligible).toBeTrue();
     expect(raw.decodeParms).toEqual([{ ColorTransform: 0, Columns: 1 }]);
+  });
+
+  it("resolves indirect decode parameter arrays before normalizing them", function () {
+    const params = new Dict();
+    params.set("ColorTransform", 0);
+    const arrayRef = Ref.get(10, 0);
+    const paramsRef = Ref.get(11, 0);
+    const objects = new Map([
+      [arrayRef, [paramsRef]],
+      [paramsRef, params],
+    ]);
+    const imageObj = makeImage(Name.get("DeviceCMYK"), {
+      Filter: [Name.get("DCTDecode")],
+      DecodeParms: arrayRef,
+    });
+    const indirectXref = {
+      fetchIfRef: value => objects.get(value) ?? value,
+    };
+    const raw = getRawImageData({
+      imageObj,
+      xref: indirectXref,
+      resources: null,
+    });
+    expect(raw.eligible).toBeTrue();
+    expect(raw.decodeParms).toEqual([{ ColorTransform: 0 }]);
+
+    params.set("ColorTransform", 2);
+    expect(
+      getRawImageData({ imageObj, xref: indirectXref, resources: null }).reason
+    ).toBe("INVALID_DECODE_PARMS");
+  });
+
+  it("preserves image soft-mask metadata and its matte", function () {
+    const dict = new Dict();
+    dict.set("Subtype", Name.get("Image"));
+    dict.set("Width", 2);
+    dict.set("Height", 3);
+    dict.set("BitsPerComponent", 8);
+    dict.set("ColorSpace", Name.get("DeviceGray"));
+    dict.set("Filter", Name.get("FlateDecode"));
+    const params = new Dict();
+    params.set("Predictor", 12);
+    dict.set("DecodeParms", params);
+    dict.set("Decode", [1, 0]);
+    dict.set("Matte", [0, 0, 0, 1]);
+    const raw = extract(
+      makeImage(Name.get("DeviceCMYK"), {
+        SMask: new Stream(new Uint8Array(6), 0, 6, dict),
+      })
+    );
+    expect(raw.eligible).toBeFalse();
+    expect(raw.reason).toBe("SOFT_MASKED_IMAGE");
+    expect(raw.bytes).toBeNull();
+    expect(raw.softMask).toEqual({
+      kind: "softMask",
+      bytes: undefined,
+      filters: ["FlateDecode"],
+      decodeParms: [{ Predictor: 12 }],
+      decode: [1, 0],
+      matte: [0, 0, 0, 1],
+      width: 2,
+      height: 3,
+      bitsPerComponent: 8,
+      sourceColorSpace: { kind: "DeviceGray", components: 1 },
+    });
+    expect(raw.matte).toEqual([0, 0, 0, 1]);
   });
 });

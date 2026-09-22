@@ -23,6 +23,8 @@ either an image descriptor or transparency-group metadata. Any mask, soft mask,
 or matte makes the image ineligible, so the importer must use pdf.js's
 rasterized image object. An ineligible record retains metadata, has
 `eligible: false`, `bytes: null`, and a stable `reason`.
+Image soft-mask descriptors preserve their `/Matte` in `softMask.matte`;
+this value is also exposed in the parent record's `matte` field.
 
 The native path accepts only one DCT filter, 8-bit samples, and DeviceGray,
 DeviceRGB, DeviceCMYK, or valid ICCBased spaces with 1, 3, or 4 components. It

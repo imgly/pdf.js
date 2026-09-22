@@ -423,7 +423,7 @@ class WorkerMessageHandler {
             trimBox,
             bleedBox,
             colorSpaceResources,
-            imglyPatchVersion: 2,
+            imglyPatchVersion: 3,
           };
         });
       });

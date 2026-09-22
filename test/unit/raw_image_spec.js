@@ -53,8 +53,13 @@ describe("raw image accessor", function () {
     imageObj.decode = [1, 0, 1, 0, 1, 0, 1, 0];
     const raw = extract(imageObj);
     expect(raw.eligible).toBeTrue();
-    expect(raw.data).toEqual(jpeg);
-    expect(raw.colorSpace).toEqual({ name: "DeviceCMYK" });
+    expect(raw.bytes).toEqual(jpeg);
+    expect(raw.filters).toEqual(["DCTDecode"]);
+    expect(raw.sourceColorSpace).toEqual({
+      kind: "DeviceCMYK",
+      components: 4,
+    });
+    expect(raw.effectiveColorSpace).toEqual(raw.sourceColorSpace);
     expect(raw.decode).toEqual(imageObj.decode);
   });
 
@@ -67,7 +72,7 @@ describe("raw image accessor", function () {
       ])
     );
     expect(raw.eligible).toBeFalse();
-    expect(raw.reason).toBe("UNSUPPORTED_COLOR_SPACE");
+    expect(raw.reason).toBe("SEPARATION_OR_DEVICEN");
   });
 
   it("rejects a malformed ICC component count", function () {
@@ -76,7 +81,7 @@ describe("raw image accessor", function () {
     const profile = new Stream(new Uint8Array(128), 0, 128, profileDict);
     const raw = extract(makeImage([Name.get("ICCBased"), profile]));
     expect(raw.eligible).toBeFalse();
-    expect(raw.reason).toBe("INVALID_COLOR_SPACE");
+    expect(raw.reason).toBe("INVALID_ICC_COMPONENT_COUNT");
   });
 
   it("exposes a matching RGB ICC profile", function () {
@@ -98,8 +103,9 @@ describe("raw image accessor", function () {
     imageObj.colorSpace = { name: "DeviceRGB" };
     const raw = extract(imageObj);
     expect(raw.eligible).toBeTrue();
-    expect(raw.colorSpace.n).toBe(3);
-    expect(raw.colorSpace.profile).toEqual(profileBytes);
+    expect(raw.sourceColorSpace.components).toBe(3);
+    expect(raw.sourceColorSpace.profile).toEqual(profileBytes);
+    expect(raw.effectiveColorSpace).toEqual(raw.sourceColorSpace);
   });
 
   it("reports masks and keeps masked images on the raster path", function () {
@@ -108,7 +114,7 @@ describe("raw image accessor", function () {
     );
     expect(raw.eligible).toBeFalse();
     expect(raw.reason).toBe("MASKED_IMAGE");
-    expect(raw.mask.type).toBe("colorKey");
+    expect(raw.mask.kind).toBe("colorKey");
   });
 
   it("rejects malformed DCT decode parameters", function () {
@@ -117,5 +123,16 @@ describe("raw image accessor", function () {
     );
     expect(raw.eligible).toBeFalse();
     expect(raw.reason).toBe("INVALID_DECODE_PARMS");
+  });
+
+  it("preserves all decode parameter entries as plain values", function () {
+    const params = new Dict();
+    params.set("ColorTransform", 0);
+    params.set("Columns", 1);
+    const raw = extract(
+      makeImage(Name.get("DeviceCMYK"), { DecodeParms: params })
+    );
+    expect(raw.eligible).toBeTrue();
+    expect(raw.decodeParms).toEqual([{ ColorTransform: 0, Columns: 1 }]);
   });
 });

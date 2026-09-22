@@ -41,6 +41,7 @@
     "pdf_viewer.component_spec.js",
     "pdf_viewer_spec.js",
     "primitives_spec.js",
+    "output_intents_spec.js",
     "raw_image_spec.js",
     "stream_spec.js",
     "struct_tree_spec.js",

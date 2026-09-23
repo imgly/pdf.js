@@ -1,39 +1,123 @@
-name: Publish release
+name: Publish IMG.LY pdf.js
 on:
   release:
     types: [published]
+
 permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
 jobs:
   publish:
-    name: Publish
+    name: Build and publish @imgly/pdfjs-dist
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        node-version: [lts/*]
+    environment: npm-publish
 
     steps:
-      - name: Checkout repository
+      - name: Parse IMG.LY release tag
+        id: release
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if [[ "$RELEASE_TAG" =~ ^imgly/v([0-9]+\.[0-9]+\.[0-9]+)-r([1-9][0-9]*)$ ]]; then
+            upstream_version="${BASH_REMATCH[1]}"
+            patch_revision="${BASH_REMATCH[2]}"
+          else
+            echo "Expected tag imgly/v<upstream>-r<revision>, got: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          {
+            echo "upstream_version=$upstream_version"
+            echo "patch_revision=$patch_revision"
+            echo "package_version=$upstream_version-imgly.$patch_revision"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout release tag
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Use Node.js ${{ matrix.node-version }}
+      - name: Verify release branch
+        shell: bash
+        env:
+          UPSTREAM_VERSION: ${{ steps.release.outputs.upstream_version }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          tag_ref="refs/tags/$RELEASE_TAG"
+          if ! git show-ref --verify --quiet "$tag_ref"; then
+            echo "Missing release tag: $tag_ref" >&2
+            exit 1
+          fi
+          if [[ "$(git rev-parse "${tag_ref}^{commit}")" != "$GITHUB_SHA" ]]; then
+            echo "Release tag moved after the release event" >&2
+            exit 1
+          fi
+
+          branch_ref="refs/remotes/origin/imgly/v$UPSTREAM_VERSION"
+          if ! git show-ref --verify --quiet "$branch_ref"; then
+            echo "Missing release branch: $branch_ref" >&2
+            exit 1
+          fi
+          if [[ "$(git rev-parse HEAD)" != "$(git rev-parse "$branch_ref")" ]]; then
+            echo "Release tag must point to the release branch tip" >&2
+            exit 1
+          fi
+
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: '22'
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Use npm with trusted publishing support
+        run: npm install --global 'npm@^11.5.1'
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build the `pdfjs-dist` library
-        run: npx gulp dist
+      - name: Check IMG.LY patches
+        run: ./scripts/check-patches.sh
 
-      - name: Publish the `pdfjs-dist` library to NPM
-        run: npm publish ./build/dist --provenance
+      - name: Run fork tests
+        run: |
+          npx gulp externaltest
+          npx gulp unittestcli
+
+      - name: Build distribution
+        run: npx gulp dist
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          IMGLY_UPSTREAM_VERSION: ${{ steps.release.outputs.upstream_version }}
+          IMGLY_PATCH_REVISION: ${{ steps.release.outputs.patch_revision }}
+
+      - name: Verify distribution
+        env:
+          EXPECTED_VERSION: ${{ steps.release.outputs.package_version }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+
+          const pkg = JSON.parse(readFileSync("build/dist/package.json", "utf8"));
+          const expectedVersion = process.env.EXPECTED_VERSION;
+          if (
+            pkg.name !== "@imgly/pdfjs-dist" ||
+            pkg.version !== expectedVersion ||
+            pkg.repository?.url !== "git+https://github.com/imgly/pdf.js.git"
+          ) {
+            throw new Error(
+              "Unexpected package: " + pkg.name + "@" + pkg.version + " (" + pkg.repository?.url + "); expected @imgly/pdfjs-dist@" + expectedVersion
+            );
+          }
+          NODE
+          grep -q 'imglyPatchVersion' build/dist/legacy/build/pdf.worker.mjs
+          npm pack --dry-run ./build/dist
+
+      - name: Publish to npm
+        run: npm publish ./build/dist --access public --tag latest

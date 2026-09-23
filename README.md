@@ -45,56 +45,71 @@ with a loud error rather than producing silently degraded output.
 
 - `master` — mirror of upstream `mozilla/pdf.js`.
 - `imgly/v<upstream>` — release branch. Branched off the upstream tag
-  `v<upstream>` with the four `imgly:` commits replayed on top.
+  `v<upstream>` with the IMG.LY patches replayed on top.
 - `scripts/check-patches.sh` — minimal grep guardrail; run after every
   rebase to confirm the patched markers still exist in source.
 
 ## Per-release runbook
 
-Each new pdf.js version we want to consume:
+Publishing runs through [`publish_release.yml`](./.github/workflows/publish_release.yml).
+The workflow builds and checks the distribution, then publishes it to npm
+through trusted publishing. Developers do not need personal npm publish access.
+
+### One-time setup
+
+A maintainer of [`@imgly/pdfjs-dist`](https://www.npmjs.com/package/@imgly/pdfjs-dist)
+must configure an npm trusted publisher for GitHub organization `imgly`,
+repository `pdf.js`, workflow `publish_release.yml`, and environment
+`npm-publish`. Allow direct `npm publish`. A GitHub repository administrator
+must configure the `npm-publish` environment with required reviewers
+and allow only tags matching `imgly/v*-r*` before enabling npm trust.
+Protect the release branches and tags with GitHub rulesets. The workflow
+cannot publish until the npm trust is configured.
+
+### Prepare a release
+
+For a new upstream pdf.js version, fetch its tag and replay the complete set
+of IMG.LY commits from the previous release branch. For example:
 
 ```sh
 git fetch upstream --tags
 git checkout -b imgly/v<NEW> v<NEW>
-git cherry-pick <first-imgly-commit>..<last-imgly-commit>   # from prev release branch
-# Resolve any conflicts (commonly in src/{display/api,core/{catalog,document,evaluator,raw_image,worker}}.js)
-
+git cherry-pick v<OLD>..imgly/v<OLD>
+# Resolve conflicts, then review and test the patched APIs.
 ./scripts/check-patches.sh
-
-npm install
-npx gulp dist                                 # IMGLY_PATCH_REVISION=1 by default
-grep -q imglyPatchVersion build/dist/legacy/build/pdf.worker.mjs
-
-cd build/dist
-npm publish --access public --tag latest
 ```
 
-`gulp dist` writes a manifest with name `@imgly/pdfjs-dist`, version
-`<UPSTREAM>-imgly.<rev>`, and the IMG.LY repository URLs (see
-`packageJson()` in `gulpfile.mjs`). The upstream version comes from the
-nearest `v*.*.*` tag reachable from `HEAD`; `<rev>` defaults to `1`.
+The range `v<OLD>..imgly/v<OLD>` includes the first IMG.LY commit after
+the upstream tag. When updating the existing upstream version, apply the
+fixes to its current `imgly/v<upstream>` branch instead.
 
-When **republishing the same upstream tag** (e.g. fixing a missed hunk on
-top of `imgly/v4.10.38`) bump the revision:
+After the branch changes have been reviewed and merged, create a GitHub
+Release whose tag points to the **current tip** of that release branch.
+Use `imgly/v<upstream>-r<revision>` as the tag, for example
+`imgly/v4.10.38-r3` for npm version `4.10.38-imgly.3`. Start a new
+upstream version at revision 1; increase the revision for each later
+publication on the same upstream version. The tag must not start with
+`v`, which the local build reserves for upstream version tags.
 
-```sh
-IMGLY_PATCH_REVISION=2 npx gulp dist
-cd build/dist && npm publish --access public --tag latest
-```
-
-If you forget, npm refuses the second publish (version already exists),
-which is a safer failure than overwriting the previous tarball.
+The workflow checks that the tag points to the matching release branch tip,
+runs the fork checks and tests, builds `build/dist`, and verifies its
+name and version before publishing. It fails if the tag or built package
+does not match the expected version. `IMGLY_UPSTREAM_VERSION` and
+`IMGLY_PATCH_REVISION` are set by the workflow from the release tag;
+local builds still derive the upstream version from a reachable upstream
+tag when no override is set.
 
 Then in the `@imgly/pdf-importer` consumer: bump the
-`@imgly/pdfjs-dist` dependency to the new version, run the regression
-suite.
+`@imgly/pdfjs-dist` dependency, update `REQUIRED_PATCH_VERSION` if
+the patched API contract changed, and run the regression suite. The npm
+revision and `imglyPatchVersion` are separate values.
 
 ## When to bump `imglyPatchVersion`
 
 Bump the integer (currently `3` in `src/core/worker.js`) **whenever the
 shape of any patched field changes** (e.g. new key in
 `colorSpaceResources` entries, new `solid` semantics, etc.). The
-consumer's `EXPECTED_PATCH_VERSION` constant must be updated in
+consumer's `REQUIRED_PATCH_VERSION` constant must be updated in
 lockstep — the runtime check is your only safety net for semantic
 drift.
 

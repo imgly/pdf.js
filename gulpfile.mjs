@@ -2230,34 +2230,35 @@ gulp.task(
 );
 
 function packageJson() {
-  // imgly: emit a fork-scoped manifest so the published tarball is correct
-  // out of the box. The version is `<upstream>-imgly.<rev>` where:
-  //   - <upstream> comes from the most recent v*.*.* git tag reachable
-  //     from HEAD (e.g. `v4.10.38` → `4.10.38`). Release branches
-  //     (`imgly/v<UPSTREAM>`) branch off that tag, so this gives the
-  //     correct anchor automatically.
-  //   - <rev> is the IMGLY_PATCH_REVISION env var, defaulting to 1.
-  //     Bump it when republishing the same upstream tag, e.g.
-  //
-  //       IMGLY_PATCH_REVISION=2 npx gulp dist
-  //
-  //     If you forget, npm refuses the second publish (version already
-  //     exists), which is a safer failure than overwriting -imgly.1.
-  let upstreamVersion;
-  try {
-    upstreamVersion = execSync(
-      "git describe --tags --abbrev=0 --match='v*.*.*'"
-    )
-      .toString()
-      .trim()
-      .replace(/^v/, "");
-  } catch {
-    // Fallback to the upstream-derived version (commits-since-baseVersion).
-    // Only hit during a non-git build; normal `npx gulp dist` will use
-    // the tag.
-    upstreamVersion = getVersionJSON().version;
+  // imgly: emit a fork-scoped manifest with version
+  // `<upstream>-imgly.<rev>`. Releases set both components explicitly
+  // from their validated GitHub release tag. Local builds can still use
+  // the nearest upstream tag and revision 1 by default.
+  const upstreamOverride = process.env.IMGLY_UPSTREAM_VERSION;
+  if (upstreamOverride && !/^\d+\.\d+\.\d+$/.test(upstreamOverride)) {
+    throw new Error("IMGLY_UPSTREAM_VERSION must be an X.Y.Z version");
   }
+
+  let upstreamVersion = upstreamOverride;
+  if (!upstreamVersion) {
+    try {
+      upstreamVersion = execSync(
+        "git describe --tags --abbrev=0 --match='v*.*.*'"
+      )
+        .toString()
+        .trim()
+        .replace(/^v/, "");
+    } catch {
+      // Keep the upstream-derived version for non-release builds without
+      // a reachable upstream tag.
+      upstreamVersion = getVersionJSON().version;
+    }
+  }
+
   const patchRevision = process.env.IMGLY_PATCH_REVISION || "1";
+  if (!/^[1-9]\d*$/.test(patchRevision)) {
+    throw new Error("IMGLY_PATCH_REVISION must be a positive integer");
+  }
   const VERSION = `${upstreamVersion}-imgly.${patchRevision}`;
 
   const DIST_NAME = "@imgly/pdfjs-dist";

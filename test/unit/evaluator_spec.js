@@ -395,6 +395,39 @@ describe("evaluator", function () {
     });
   });
 
+  describe("raw image masks", function () {
+    for (const width of [1, 9]) {
+      it(`exposes a ${width}-pixel stencil through the mask image object`, async function () {
+        const handler = new HandlerMock();
+        const evaluator = partialEvaluator.clone({
+          exposeRawImageData: true,
+          isOffscreenCanvasSupported: false,
+        });
+        evaluator.handler = handler;
+        const dict = new Dict();
+        dict.set("Width", width);
+        dict.set("Height", 1);
+        dict.set("ImageMask", true);
+        dict.set("Decode", [1, 0]);
+        const bytes = new Uint8Array((width + 7) >> 3);
+        const image = new Stream(bytes, 0, bytes.length, dict);
+        const operatorList = new OperatorList();
+
+        await evaluator.buildPaintImageXObject({
+          resources: new ResourcesMock(),
+          image,
+          operatorList,
+        });
+
+        expect(handler.inputs.length).toBe(1);
+        const imgData = handler.inputs[0].data[3];
+        expect(imgData.rawImage.reason).toBe("IMAGE_MASK");
+        expect(imgData.rawImage.imageMask.decodedBytes).toEqual(bytes);
+        expect(operatorList.fnArray).toContain(OPS.paintImageMaskXObject);
+      });
+    }
+  });
+
   describe("operator list", function () {
     class StreamSinkMock {
       enqueue() {}

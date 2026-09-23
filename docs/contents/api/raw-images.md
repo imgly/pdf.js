@@ -18,13 +18,29 @@ space, while `effectiveColorSpace` includes resource and DefaultGray/DefaultRGB/
 DefaultCMYK resolution. Device spaces use `{ kind, components }`; ICCBased
 spaces additionally contain the decoded `profile` bytes.
 
-`mask` distinguishes color-key ranges from image masks. `softMask` reports
-either an image descriptor or transparency-group metadata. Any mask, soft mask,
-or matte makes the image ineligible, so the importer must use pdf.js's
-rasterized image object. An ineligible record retains metadata, has
-`eligible: false`, `bytes: null`, and a stable `reason`.
+`mask` distinguishes color-key ranges from image masks. A DCT image with a
+color-key or image `/Mask` remains eligible and retains its JPEG bytes; the
+caller must apply the mask to reproduce transparency.
+`softMask` reports either an image descriptor or transparency-group metadata.
+A DCT image with a plain image `/SMask` remains eligible and retains its JPEG
+bytes; the caller must apply the soft mask to reproduce transparency. Mask
+descriptors include raw bytes when the mask stream itself uses DCT; for other
+filters, the caller can use the alpha in pdf.js's rasterized image object. An
+unsupported mask, unsupported soft-mask form, or top-level `/Matte` keeps the
+image ineligible.
+An ineligible record retains metadata, has `eligible: false`, `bytes: null`,
+and a stable `reason`.
 Image soft-mask descriptors preserve their `/Matte` in `softMask.matte`;
 this value is also exposed in the parent record's `matte` field.
+
+A standalone `/ImageMask true` stencil takes a separate rendering path. Its
+image object (or the `paintImageMaskXObject` argument in a Type 3 font) has a
+`rawImage` record with `reason: "IMAGE_MASK"` and
+`eligible: false`, since its data is not a JPEG color image. The
+`rawImage.imageMask.decodedBytes` field contains a copy of the decoded, packed
+one-bit samples before applying `/Decode`, with rows of `Math.ceil(width / 8)`
+bytes. The descriptor also contains dimensions, filters, decode parameters,
+and `/Decode`. Painting those samples requires the current nonstroking color.
 
 The native path accepts only one DCT filter, 8-bit samples, and DeviceGray,
 DeviceRGB, DeviceCMYK, or valid ICCBased spaces with 1, 3, or 4 components. It

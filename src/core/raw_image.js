@@ -162,6 +162,7 @@ function rawMask(value, kind, xref, resources) {
   return {
     kind,
     bytes: stream instanceof JpegStream ? stream.bytes.slice() : undefined,
+    imageMask: dict.get("IM", "ImageMask") === true,
     filters,
     decodeParms: decodeParms(dict, xref),
     decode: dict.getArray("D", "Decode") || null,
@@ -174,6 +175,30 @@ function rawMask(value, kind, xref, resources) {
       xref,
       resources
     ),
+  };
+}
+
+function getRawImageMaskData({ image, xref, resources, width, height, data }) {
+  const imageMask = rawMask(image, "imageMask", xref, resources);
+  imageMask.decodedBytes = data.slice();
+  return {
+    version: 1,
+    eligible: false,
+    reason: "IMAGE_MASK",
+    width,
+    height,
+    bitsPerComponent: 1,
+    bytes: null,
+    filters: imageMask.filters,
+    decodeParms: imageMask.decodeParms,
+    decode: imageMask.decode,
+    interpolate: image.dict.get("I", "Interpolate") === true,
+    sourceColorSpace: null,
+    effectiveColorSpace: null,
+    mask: null,
+    softMask: null,
+    matte: null,
+    imageMask,
   };
 }
 
@@ -256,10 +281,14 @@ function getRawImageData({ imageObj, xref, resources }) {
     effectiveColorSpace.kind !== "ICCBased"
   ) {
     reason = "UNSUPPORTED_COLOR_SPACE";
-  } else if (maskValue || matte || imageObj.imageMask) {
-    reason = "MASKED_IMAGE";
-  } else if (softMaskValue) {
-    reason = "SOFT_MASKED_IMAGE";
+  } else if (result.mask?.reason) {
+    reason = "UNSUPPORTED_MASK_COMPOSITING";
+  } else if (softMask?.reason) {
+    reason = "UNSUPPORTED_MASK_COMPOSITING";
+  } else if (matte) {
+    reason = "MATTE_WITHOUT_SOFT_MASK";
+  } else if (imageObj.imageMask) {
+    reason = "IMAGE_MASK";
   } else if (imageObj.numComps !== effectiveColorSpace.components) {
     reason = "INVALID_COLOR_SPACE";
   } else if (
@@ -283,4 +312,4 @@ function getRawImageData({ imageObj, xref, resources }) {
   return result;
 }
 
-export { getRawImageData };
+export { getRawImageData, getRawImageMaskData };

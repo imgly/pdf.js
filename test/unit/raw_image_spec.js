@@ -1,5 +1,8 @@
 import { Dict, Name, Ref } from "../../src/core/primitives.js";
-import { getRawImageData } from "../../src/core/raw_image.js";
+import {
+  getRawImageData,
+  getRawImageMaskData,
+} from "../../src/core/raw_image.js";
 import { JpegStream } from "../../src/core/jpeg_stream.js";
 import { Stream } from "../../src/core/stream.js";
 
@@ -93,13 +96,92 @@ describe("raw image accessor", function () {
     expect(raw.effectiveColorSpace).toEqual(raw.sourceColorSpace);
   });
 
-  it("reports masks and keeps masked images on the raster path", function () {
+  it("exposes a JPEG with a color-key mask", function () {
     const raw = extract(
       makeImage(Name.get("DeviceCMYK"), { Mask: [0, 0, 0, 0, 0, 0, 0, 0] })
     );
-    expect(raw.eligible).toBeFalse();
-    expect(raw.reason).toBe("MASKED_IMAGE");
+    expect(raw.eligible).toBeTrue();
+    expect(raw.reason).toBeNull();
+    expect(raw.bytes).toEqual(jpeg);
     expect(raw.mask.kind).toBe("colorKey");
+    expect(raw.mask.ranges).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+  });
+
+  it("exposes a JPEG with an image mask", function () {
+    const dict = new Dict();
+    dict.set("Width", 1);
+    dict.set("Height", 1);
+    dict.set("ImageMask", true);
+    dict.set("Filter", Name.get("CCITTFaxDecode"));
+    dict.set("Decode", [1, 0]);
+    const raw = extract(
+      makeImage(Name.get("DeviceCMYK"), {
+        Mask: new Stream(new Uint8Array([0]), 0, 1, dict),
+      })
+    );
+    expect(raw.eligible).toBeTrue();
+    expect(raw.bytes).toEqual(jpeg);
+    expect(raw.mask.kind).toBe("image");
+    expect(raw.mask.imageMask).toBeTrue();
+    expect(raw.mask.width).toBe(1);
+    expect(raw.mask.height).toBe(1);
+    expect(raw.mask.filters).toEqual(["CCITTFaxDecode"]);
+    expect(raw.mask.decode).toEqual([1, 0]);
+  });
+
+  it("keeps unsupported masks on the raster path", function () {
+    const raw = extract(
+      makeImage(Name.get("DeviceCMYK"), { Mask: Name.get("Unsupported") })
+    );
+    expect(raw.eligible).toBeFalse();
+    expect(raw.reason).toBe("UNSUPPORTED_MASK_COMPOSITING");
+    expect(raw.bytes).toBeNull();
+    expect(raw.mask.reason).toBe("UNSUPPORTED_COMPOSITING");
+  });
+
+  it("reports a matte without a soft mask", function () {
+    const raw = extract(
+      makeImage(Name.get("DeviceCMYK"), { Matte: [0, 0, 0, 1] })
+    );
+    expect(raw.eligible).toBeFalse();
+    expect(raw.reason).toBe("MATTE_WITHOUT_SOFT_MASK");
+  });
+
+  it("reports a stencil image", function () {
+    const imageObj = makeImage();
+    imageObj.imageMask = true;
+    const raw = extract(imageObj);
+    expect(raw.eligible).toBeFalse();
+    expect(raw.reason).toBe("IMAGE_MASK");
+  });
+
+  it("exposes decoded stencil samples without treating them as JPEG", function () {
+    const dict = new Dict();
+    dict.set("Width", 9);
+    dict.set("Height", 1);
+    dict.set("ImageMask", true);
+    dict.set("Filter", Name.get("FlateDecode"));
+    dict.set("Decode", [1, 0]);
+    const image = new Stream(new Uint8Array([0]), 0, 1, dict);
+    const data = new Uint8Array([0x80, 0x00]);
+    const raw = getRawImageMaskData({
+      image,
+      xref,
+      resources: null,
+      width: 9,
+      height: 1,
+      data,
+    });
+    data[0] = 0;
+    expect(raw.eligible).toBeFalse();
+    expect(raw.reason).toBe("IMAGE_MASK");
+    expect(raw.bytes).toBeNull();
+    expect(raw.bitsPerComponent).toBe(1);
+    expect(raw.imageMask.kind).toBe("imageMask");
+    expect(raw.imageMask.imageMask).toBeTrue();
+    expect(raw.imageMask.filters).toEqual(["FlateDecode"]);
+    expect(raw.imageMask.decode).toEqual([1, 0]);
+    expect(raw.imageMask.decodedBytes).toEqual(new Uint8Array([0x80, 0x00]));
   });
 
   it("rejects malformed DCT decode parameters", function () {
@@ -151,7 +233,7 @@ describe("raw image accessor", function () {
     ).toBe("INVALID_DECODE_PARMS");
   });
 
-  it("preserves image soft-mask metadata and its matte", function () {
+  it("exposes a JPEG with an image soft mask and preserves its matte", function () {
     const dict = new Dict();
     dict.set("Subtype", Name.get("Image"));
     dict.set("Width", 2);
@@ -169,12 +251,13 @@ describe("raw image accessor", function () {
         SMask: new Stream(new Uint8Array(6), 0, 6, dict),
       })
     );
-    expect(raw.eligible).toBeFalse();
-    expect(raw.reason).toBe("SOFT_MASKED_IMAGE");
-    expect(raw.bytes).toBeNull();
+    expect(raw.eligible).toBeTrue();
+    expect(raw.reason).toBeNull();
+    expect(raw.bytes).toEqual(jpeg);
     expect(raw.softMask).toEqual({
       kind: "softMask",
       bytes: undefined,
+      imageMask: false,
       filters: ["FlateDecode"],
       decodeParms: [{ Predictor: 12 }],
       decode: [1, 0],
@@ -185,5 +268,38 @@ describe("raw image accessor", function () {
       sourceColorSpace: { kind: "DeviceGray", components: 1 },
     });
     expect(raw.matte).toEqual([0, 0, 0, 1]);
+  });
+
+  it("preserves DCT soft-mask bytes", function () {
+    const dict = new Dict();
+    dict.set("Width", 1);
+    dict.set("Height", 1);
+    dict.set("BitsPerComponent", 8);
+    dict.set("ColorSpace", Name.get("DeviceGray"));
+    dict.set("Filter", Name.get("DCTDecode"));
+    const stream = new Stream(jpeg, 0, jpeg.length, dict);
+    const raw = extract(
+      makeImage(Name.get("DeviceCMYK"), {
+        SMask: new JpegStream(stream, jpeg.length, null),
+      })
+    );
+    expect(raw.eligible).toBeTrue();
+    expect(raw.bytes).toEqual(jpeg);
+    expect(raw.softMask.bytes).toEqual(jpeg);
+    expect(raw.softMask.filters).toEqual(["DCTDecode"]);
+  });
+
+  it("keeps unsupported soft-mask forms on the raster path", function () {
+    const dict = new Dict();
+    dict.set("Subtype", Name.get("Form"));
+    const raw = extract(
+      makeImage(Name.get("DeviceCMYK"), {
+        SMask: new Stream(new Uint8Array(0), 0, 0, dict),
+      })
+    );
+    expect(raw.eligible).toBeFalse();
+    expect(raw.reason).toBe("UNSUPPORTED_MASK_COMPOSITING");
+    expect(raw.bytes).toBeNull();
+    expect(raw.softMask.reason).toBe("UNSUPPORTED_COMPOSITING");
   });
 });

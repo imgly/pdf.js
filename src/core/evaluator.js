@@ -53,6 +53,7 @@ import {
   getSymbolsFonts,
   isKnownFontName,
 } from "./standard_fonts.js";
+import { getRawImageData, getRawImageMaskData } from "./raw_image.js";
 import { getTilingPatternIR, Pattern } from "./pattern.js";
 import { getXfaFontDict, getXfaFontName } from "./xfa_fonts.js";
 import { IdentityToUnicodeMap, ToUnicodeMap } from "./to_unicode_map.js";
@@ -74,7 +75,6 @@ import { FontFlags } from "./fonts_utils.js";
 import { getFontSubstitution } from "./font_substitutions.js";
 import { getGlyphsUnicode } from "./glyphlist.js";
 import { getMetrics } from "./metrics.js";
-import { getRawImageData } from "./raw_image.js";
 import { getUnicodeForGlyph } from "./unicode.js";
 import { ImageResizer } from "./image_resizer.js";
 import { JpegStream } from "./jpeg_stream.js";
@@ -620,6 +620,26 @@ class PartialEvaluator {
       const bitStrideLength = (w + 7) >> 3;
       const imgArray = image.getBytes(bitStrideLength * h);
       const decode = dict.getArray("D", "Decode");
+      let rawImage = null;
+      if (this.options.exposeRawImageData) {
+        try {
+          rawImage = getRawImageMaskData({
+            image,
+            xref: this.xref,
+            resources,
+            width: w,
+            height: h,
+            data: imgArray,
+          });
+        } catch (reason) {
+          warn(`Unable to expose raw image mask: "${reason}".`);
+          rawImage = {
+            version: 1,
+            eligible: false,
+            reason: "EXTRACTION_FAILED",
+          };
+        }
+      }
 
       if (this.parsingType3Font) {
         imgData = PDFImage.createRawMask({
@@ -630,6 +650,9 @@ class PartialEvaluator {
           inverseDecode: decode?.[0] > 0,
           interpolate,
         });
+        if (rawImage) {
+          imgData.rawImage = rawImage;
+        }
 
         imgData.cached = !!cacheKey;
         args = [imgData];
@@ -668,6 +691,16 @@ class PartialEvaluator {
         interpolate,
         isOffscreenCanvasSupported: this.options.isOffscreenCanvasSupported,
       });
+      if (imgData.isSingleOpaquePixel && rawImage) {
+        imgData = PDFImage.createRawMask({
+          imgArray,
+          width: w,
+          height: h,
+          imageIsFromDecodeStream: image instanceof DecodeStream,
+          inverseDecode: decode?.[0] > 0,
+          interpolate,
+        });
+      }
 
       if (imgData.isSingleOpaquePixel) {
         // Handles special case of mainly LaTeX documents which use image
@@ -697,12 +730,17 @@ class PartialEvaluator {
         return;
       }
 
+      if (rawImage) {
+        imgData.rawImage = rawImage;
+      }
+
       const objId = `mask_${this.idFactory.createObjId()}`;
       operatorList.addDependency(objId);
 
       imgData.dataLen = imgData.bitmap
         ? imgData.width * imgData.height * 4
         : imgData.data.length;
+      imgData.dataLen += rawImage?.imageMask?.decodedBytes?.byteLength || 0;
       this._sendImgData(objId, imgData);
 
       args = [
@@ -903,6 +941,8 @@ class PartialEvaluator {
         }
 
         imgData.dataLen += imgData.rawImage?.bytes?.byteLength || 0;
+        imgData.dataLen += imgData.rawImage?.mask?.bytes?.byteLength || 0;
+        imgData.dataLen += imgData.rawImage?.softMask?.bytes?.byteLength || 0;
 
         if (cacheGlobally) {
           this.globalImageCache.addByteSize(imageRef, imgData.dataLen);
